@@ -1,0 +1,7 @@
+customer:
+  singular: customer
+  plural: customers
+  fields:
+    default_card_token: string
+  hasOne:
+    - members.account
