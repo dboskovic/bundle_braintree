@@ -1,18 +1,32 @@
 <?php
 
 namespace Bundles\Braintree;
+use Bundles\SQL\callException;
+use Bundles\SQL\SQLBundle;
 use Exception;
 use e;
 
-
 /**
- * Braintree Bundle
- * @author David D. Boskovic
+ * Braintree EvolutionSDK Bundle
+ *
+ * @author    David Boskovic
+ * @since     06/24/2012
+ * @package   braintree
+ * @copyright Apache 2.0 Open Source
+ *
+ * @todo add support for a special secure subdomain to be configured for https links
+ * @todo clean up and document better
  */
-class Bundle {
+class Bundle extends SQLBundle  {
+
 
 	/**
 	 * Initialize Braintree and load resources.
+	 *	 
+	 * @author  David Boskovic
+	 * @since   06/24/2012
+	 *
+	 * @todo Clean this up. I don't like the way it's formatted.
 	 **/	
 	public function __initBundle() {
 
@@ -39,32 +53,76 @@ class Bundle {
 			$this->_configure($event['environment'], $event['merchant_id'], $event['public_key'], $event['private_key']);
 	}
 
-	public function __routeBundle($path) {
-		switch($path[0]) {
-			case 'response':
-				$pd = e::$session->data->_braintree_presave;
-				$result = \Braintree_TransparentRedirect::confirm($_SERVER['QUERY_STRING']);
-			break;
-			default:
-				throw new Exception("Cannot access /@braintree directly.");
-			break;
+	
+	/**
+	 * Sync up the braintree customer to our customer.
+	 *	 
+	 * @author  David Boskovic
+	 * @since   06/24/2012
+	 *
+	 * @example Braintree_TransparentRedirect::url(); => e::$braintree->transparentRedirect->url();
+	 * @return  object
+	 **/	
+	public function syncMemberRecords($customer, $member) {
+
+		$match = $this->getCustomers()->condition('braintree_id', $customer->id)->first();
+		if(!$match) {
+			$cc = $this->newCustomer();
+			$cc->braintree_id = $customer->id;
+
+			foreach($customer->creditCards as $card) {
+				if($card->isDefault())
+					break;
+			}
+
+			$cc->default_card_token = $card->token;
+			$cc->save();
+			$cc->linkMembersMember($member->id);
+		} else {
+			
 		}
 
 	}
 
+
+	
 	/**
-	 * get the transparent redirect URL
-	 **/
-	public function transparentRedirectURL() {
-		return \Braintree_TransparentRedirect::url();
+	 * Access all the braintree functionality through a nice little EvolutionSDK Mask.
+	 *	 
+	 * @author  David Boskovic
+	 * @since   06/24/2012
+	 *
+	 * @example Braintree_TransparentRedirect::url(); => e::$braintree->transparentRedirect->url();
+	 * @return  object
+	 **/	
+	public function __get($class) {
+
+		/**
+		 * Ignore non-braintree var requests.
+		 */
+		if(!isset($this->$class))
+			return null;
+
+		return new Accessor($class);
 	}
 
-	public function confirmResponse() {
-		return \Braintree_TransparentRedirect::confirm($_SERVER['QUERY_STRING']);
+	
+	/**
+	 * Check to see if a Braintree object exists (this is super important for LHTML)
+	 *	 
+	 * @author  David Boskovic
+	 * @since   06/24/2012
+	 **/	
+	public function __isset($class) {
+		if(!class_exists('\\Braintree_'.$class)) return false;
+		return true;
 	}
+
+
 
 	/**
 	 * Get the data for the Transparent Redirect
+	 * @todo clean this up muchly
 	 **/
 	public function transparentRedirectData($type = 'customer', $data = false) {
 		switch($type) {
@@ -74,9 +132,9 @@ class Bundle {
 					// check to see if we've already created a vault entry for this member
 
 					$a['customerId'] = $data['id'];
-					return \Braintree_TransparentRedirect::updateCustomerData($a);
+					return $this->transparentRedirect->updateCustomerData($a);
 				}
-				return \Braintree_TransparentRedirect::createCustomerData($a);
+				return $this->transparentRedirect->createCustomerData($a);
 			break;
 			case  'transaction':
 			break;
@@ -86,31 +144,143 @@ class Bundle {
 	/**
 	 * Respond to invoice charge event.
 	 * @return array
+	 * @todo make this actually charge the member account
 	 **/
-	public function _on_invoiceCharge($array) {
+	public function _on_invoiceCharge($data, $invoice) {
 
-		// 
-		return array('type' => 'braintree', 'token' => $result->id, 'charged' => $result->paid);
+		/**
+		 * Skip if the gateway is not braintree.
+		 */
+		if($data['gateway'] != 'braintree')
+			throw new Exception("Skip this event response.",401);
+
+		/**
+		 * If this is a new transaction, just use Authorize with the settlement parameter.
+		 */
+		if(!$data['token'])
+			return $this->_on_invoiceAuthorize($data, $invoice, true);
+		else {
+			$result = e::$braintree->transaction->submitForSettlement($data['token'], $data['amount']/100);
+
+			if($result->success == false) {
+				throw new Exception($result->message);
+			}
+			else {
+				$transaction = $result->transaction;
+				return array('charged' => true, 'status' => $transaction->status);
+			}
+		}
 	}
 
 
-	public function _on_invoiceInfo($chargeToken) {
-		return $this->charge('retrieve', $chargeToken);
+	/**
+	 * Respond to invoice charge event.
+	 * @return array
+	 * @todo make this actually charge the member account
+	 **/
+	public function _on_invoiceAuthorize($data, $invoice, $settle = false) {
+
+		/**
+		 * Skip if the gateway is not braintree.
+		 */
+		if($data['gateway'] != 'braintree')
+			throw new Exception("Skip this event response.",401);
+
+		/**
+		 * Prepare Braintree Data
+		 */
+		$submit_data = array(
+			'amount' => $data['amount'] / 100, // convert back to dollars
+			'orderId' => $invoice->id,
+			'options' => array(
+				'submitForSettlement' => (bool) $settle
+			)
+		);
+
+
+		// load the member from the invoice
+		$member = $invoice->getMembersMember();
+
+		// get the braintree customer from the member
+		$customer = $member->getBraintreeCustomer();
+
+		/**
+		 * Charge the Customer
+		 */
+		$result = e::$braintree->customer->sale($customer->braintree_id, $submit_data);
+		
+		if($result->success == false) {
+			throw new Exception($result->message);
+		}
+		else {
+			$transaction = $result->transaction;
+			return array(
+				'type' => 'braintree', 
+				'token' => $transaction->id, 
+				'currency' => $transaction->currencyIsoCode, 
+				'last4' => $transaction->creditCardDetails->last4, 
+				'card_type' => $transaction->creditCardDetails->cardType, 
+				'charged' => $settle, 
+				'status' => $transaction->status
+			);
+		}
+	}
+
+	public function _on_invoiceSynchronizeStatus($data) {
+
+		if($data['gateway'] != 'braintree')
+			throw new Exception("Skip this event response.",401);
+
+		$transaction = e::$braintree->transaction->find($data['token']);
+
+		return array('status' => $transaction->status);
 	}
 	
-	public function _on_invoiceRefund($chargeToken) {
-		$ch = $this->charge('retrieve', $chargeToken);
-		return $ch->refund();
+	public function _on_invoiceRefund($data) {
+
+		if($data['gateway'] != 'braintree')
+			throw new Exception("Skip this event response.",401);
+		
+		$result = $data['amount'] ? $this->transaction->refund($data['token'], $data['amount'] / 100) : $this->transaction->refund($data['token']) ;
+
+		if($result->success == false) {
+			throw new Exception($result->message);
+		}
+		else {
+			$transaction = $result->transaction;
+			return array('type' => 'braintree', 'token' => $transaction->id, 'currency' => $transaction->currencyIsoCode, 'status' => $transaction->status);
+		}
+	}
+	
+	public function _on_invoiceCredit($token) {
+
+		if($array['gateway'] != 'braintree')
+			throw new Exception("Skip this event response.",401);
 	}
 
+	public function _on_invoiceVoid($data) {
+
+		if($data['gateway'] != 'braintree')
+			throw new Exception("Skip this event response.",401);
+		
+		$result = $this->transaction->void($data['token']);
+
+		if($result->success == false) {
+			throw new Exception($result->message);
+		}
+		else {
+			$transaction = $result->transaction;
+			return array('status' => $transaction->status);
+		}
+	}
 	/**
 	 * Configure the Braintree Bundle.
 	 * @todo add exceptions and verification here.
 	 */
 	private function _configure($environment, $merchant_id, $public_key, $private_key) {		
-		\Braintree_Configuration::environment($environment);
-		\Braintree_Configuration::merchantId($merchant_id);
-		\Braintree_Configuration::publicKey($public_key);
-		\Braintree_Configuration::privateKey($private_key);
+		$this->configuration->environment($environment);
+		$this->configuration->merchantId($merchant_id);
+		$this->configuration->publicKey($public_key);
+		$this->configuration->privateKey($private_key);
 	}
 }
