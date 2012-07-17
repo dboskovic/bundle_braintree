@@ -130,10 +130,15 @@ class Bundle extends SQLBundle  {
 				$a['redirectUrl'] = e::$url->link(isset($data['link']) ? $data['link'] :'/@braintree/response');
 				if(isset($data['id'])) {
 					// check to see if we've already created a vault entry for this member
+					$member = e::$members->getMember($data['id']);
+					$customer = $member->getBraintreeCustomer();
 
-					$a['customerId'] = $data['id'];
-					return $this->transparentRedirect->updateCustomerData($a);
+					if($customer && $customer->braintree_id)
+						$a['customerId'] = $data['id'];
+					else
+						$a['customer']['id'] = $data['id'];
 				}
+				if($customer && $customer->braintree_id) return $this->transparentRedirect->updateCustomerData($a);
 				return $this->transparentRedirect->createCustomerData($a);
 			break;
 			case  'transaction':
