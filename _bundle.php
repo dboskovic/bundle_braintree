@@ -125,6 +125,8 @@ class Bundle extends SQLBundle  {
 	 * @todo clean this up muchly
 	 **/
 	public function transparentRedirectData($type = 'customer', $data = false) {
+		if($data && is_string($data))
+			$data = array('link' => $data);
 		switch($type) {
 			case 'customer':
 				$a['redirectUrl'] = e::$url->link(isset($data['link']) ? $data['link'] :'/@braintree/response');
