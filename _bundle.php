@@ -204,6 +204,14 @@ class Bundle extends SQLBundle  {
 			)
 		);
 
+		/**
+		 * This makes sure that the actual merchant account ID is honored.
+		 */
+		if($merchant_account_id = $this->getWebAppSetting('braintree-merchant-account-id'))
+			$submit_data['merchantAccountId'] = $merchant_account_id;
+		else
+			throw Exception("No Merchant account ID configured. Add through `braintree-merchant-account-id`");
+
 
 		// load the member from the invoice
 		$member = $invoice->getMembersMember();
@@ -280,6 +288,14 @@ class Bundle extends SQLBundle  {
 			return array('status' => $transaction->status);
 		}
 	}
+
+	private $settings;
+	private function getWebAppSetting($field) {
+		if(!$this->settings)
+			$this->settings = e::$webapp->subdomainAccount()->_->information;
+		return $this->settings->$field;
+	}
+
 	/**
 	 * Configure the Braintree Bundle.
 	 * @todo add exceptions and verification here.
