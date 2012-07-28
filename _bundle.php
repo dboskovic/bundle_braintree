@@ -210,7 +210,7 @@ class Bundle extends SQLBundle  {
 		if($merchant_account_id = $this->getWebAppSetting('braintree-merchant-account-id'))
 			$submit_data['merchantAccountId'] = $merchant_account_id;
 		else
-			throw Exception("No Merchant account ID configured. Add through `braintree-merchant-account-id`");
+			throw new Exception("No Merchant account ID configured. Add through `braintree-merchant-account-id`");
 
 
 		// load the member from the invoice
