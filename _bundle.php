@@ -248,7 +248,12 @@ class Bundle extends SQLBundle  {
 
 		$transaction = e::$braintree->transaction->find($data['token']);
 
-		return array('status' => $transaction->status);
+		foreach($transaction->statusHistory as $history) {
+			if($history->status = 'settled')
+				$settlement_date = $history->timestamp->getTimestamp();
+		}
+
+		return array('status' => $transaction->status, 'settlement_date' => $settlement_date);
 	}
 	
 	public function _on_invoiceRefund($data) {
