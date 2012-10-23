@@ -22,12 +22,12 @@ class Bundle extends SQLBundle  {
 
 	/**
 	 * Initialize Braintree and load resources.
-	 *	 
+	 *
 	 * @author  David Boskovic
 	 * @since   06/24/2012
 	 *
 	 * @todo Clean this up. I don't like the way it's formatted.
-	 **/	
+	 **/
 	public function __initBundle() {
 
 		# include the resources
@@ -53,16 +53,16 @@ class Bundle extends SQLBundle  {
 			$this->_configure($event['environment'], $event['merchant_id'], $event['public_key'], $event['private_key']);
 	}
 
-	
+
 	/**
 	 * Sync up the braintree customer to our customer.
-	 *	 
+	 *
 	 * @author  David Boskovic
 	 * @since   06/24/2012
 	 *
 	 * @example Braintree_TransparentRedirect::url(); => e::$braintree->transparentRedirect->url();
 	 * @return  object
-	 **/	
+	 **/
 	public function syncMemberRecords($customer, $member) {
 
 		$match = $this->getCustomers()->condition('braintree_id', $customer->id)->first();
@@ -79,22 +79,22 @@ class Bundle extends SQLBundle  {
 			$cc->save();
 			$cc->linkMembersMember($member->id);
 		} else {
-			
+
 		}
 
 	}
 
 
-	
+
 	/**
 	 * Access all the braintree functionality through a nice little EvolutionSDK Mask.
-	 *	 
+	 *
 	 * @author  David Boskovic
 	 * @since   06/24/2012
 	 *
 	 * @example Braintree_TransparentRedirect::url(); => e::$braintree->transparentRedirect->url();
 	 * @return  object
-	 **/	
+	 **/
 	public function __get($class) {
 
 		/**
@@ -106,13 +106,13 @@ class Bundle extends SQLBundle  {
 		return new Accessor($class);
 	}
 
-	
+
 	/**
 	 * Check to see if a Braintree object exists (this is super important for LHTML)
-	 *	 
+	 *
 	 * @author  David Boskovic
 	 * @since   06/24/2012
-	 **/	
+	 **/
 	public function __isset($class) {
 		if(!class_exists('\\Braintree_'.$class)) return false;
 		return true;
@@ -223,19 +223,19 @@ class Bundle extends SQLBundle  {
 		 * Charge the Customer
 		 */
 		$result = e::$braintree->customer->sale($customer->braintree_id, $submit_data);
-		
+
 		if($result->success == false) {
 			throw new Exception($result->message);
 		}
 		else {
 			$transaction = $result->transaction;
 			return array(
-				'type' => 'braintree', 
-				'token' => $transaction->id, 
-				'currency' => $transaction->currencyIsoCode, 
-				'last4' => $transaction->creditCardDetails->last4, 
-				'card_type' => $transaction->creditCardDetails->cardType, 
-				'charged' => $settle, 
+				'type' => 'braintree',
+				'token' => $transaction->id,
+				'currency' => $transaction->currencyIsoCode,
+				'last4' => $transaction->creditCardDetails->last4,
+				'card_type' => $transaction->creditCardDetails->cardType,
+				'charged' => $settle,
 				'status' => $transaction->status
 			);
 		}
@@ -253,14 +253,28 @@ class Bundle extends SQLBundle  {
 				$settlement_date = $history->timestamp->getTimestamp();
 		}
 
-		return array('status' => $transaction->status, 'settlement_date' => $settlement_date);
+		$billingAddress = $transaction->billingDetails;
+
+
+		/**
+		 * Get the billing address from Braintree.
+		 */
+		$address = array(
+			"address" => $billingAddress->streetAddress,
+			"zip_code" => $billingAddress->postalCode,
+			"state" => $billingAddress->region,
+			"city" => $billingAddress->locality,
+			"country" => $billingAddress->countryCodeAlpha2
+		);
+
+		return array('status' => $transaction->status, 'settlement_date' => $settlement_date, 'address' => $address);
 	}
-	
+
 	public function _on_invoiceRefund($data) {
 
 		if($data['gateway'] != 'braintree')
 			throw new Exception("Skip this event response.",401);
-		
+
 		$result = $data['amount'] ? $this->transaction->refund($data['token'], $data['amount'] / 100) : $this->transaction->refund($data['token']) ;
 
 		if($result->success == false) {
@@ -271,7 +285,7 @@ class Bundle extends SQLBundle  {
 			return array('type' => 'braintree', 'token' => $transaction->id, 'currency' => $transaction->currencyIsoCode, 'status' => $transaction->status);
 		}
 	}
-	
+
 	public function _on_invoiceCredit($token) {
 
 		if($array['gateway'] != 'braintree')
@@ -282,7 +296,7 @@ class Bundle extends SQLBundle  {
 
 		if($data['gateway'] != 'braintree')
 			throw new Exception("Skip this event response.",401);
-		
+
 		$result = $this->transaction->void($data['token']);
 
 		if($result->success == false) {
@@ -305,7 +319,7 @@ class Bundle extends SQLBundle  {
 	 * Configure the Braintree Bundle.
 	 * @todo add exceptions and verification here.
 	 */
-	private function _configure($environment, $merchant_id, $public_key, $private_key) {		
+	private function _configure($environment, $merchant_id, $public_key, $private_key) {
 		$this->configuration->environment($environment);
 		$this->configuration->merchantId($merchant_id);
 		$this->configuration->publicKey($public_key);
